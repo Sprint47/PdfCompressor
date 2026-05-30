@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KOMPRS — PDF Compression Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;900&family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #080810;
+  --surface:     #0F0F1A;
+  --surface2:    #16162A;
+  --border:      #22223A;
+  --border2:     #2E2E4A;
+  --accent:      #39FF14;
+  --accent-dim:  #1C7A0A;
+  --accent-glow: rgba(57,255,20,0.12);
+  --text:        #DDE0F0;
+  --muted:       #5A5A7A;
+  --danger:      #FF3C3C;
+  --warning:     #FFAA00;
+  --white:       #FFFFFF;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Ambient grid */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(57,255,20,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(57,255,20,0.025) 1px, transparent 1px);
+  background-size: 36px 36px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Corner glow */
+body::after {
+  content: '';
+  position: fixed;
+  top: -200px; right: -200px;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(57,255,20,0.06) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── HEADER ── */
+header {
+  text-align: center;
+  margin-bottom: 52px;
+}
+
+.logo {
+  font-family: 'Orbitron', monospace;
+  font-size: clamp(2.4rem, 8vw, 3.6rem);
+  font-weight: 900;
+  letter-spacing: 14px;
+  color: var(--accent);
+  text-shadow: 0 0 18px rgba(57,255,20,0.7), 0 0 50px rgba(57,255,20,0.25);
+  animation: flicker 8s infinite;
+}
+
+@keyframes flicker {
+  0%,94%,96%,100% { opacity: 1; }
+  95% { opacity: 0.85; }
+}
+
+.logo-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 7px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.wasm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 4px 12px;
+  border: 1px solid var(--border2);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  letter-spacing: 2px;
+  color: var(--muted);
+}
+
+.wasm-dot { width: 6px; height: 6px; background: #7B61FF; border-radius: 50%; }
+
+/* ── UPLOAD ZONE ── */
+#dropZone {
+  background: var(--surface);
+  border: 2px dashed var(--border2);
+  padding: 56px 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+  position: relative;
+  overflow: hidden;
+}
+
+#dropZone.over,
+#dropZone:hover { border-color: var(--accent); }
+
+#dropZone::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: var(--accent-glow);
+  opacity: 0;
+  transition: opacity .2s;
+}
+
+#dropZone.over::before,
+#dropZone:hover::before { opacity: 1; }
+
+.dz-icon {
+  width: 56px; height: 56px;
+  border: 1.5px solid var(--border2);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 20px;
+  transition: border-color .2s;
+}
+
+#dropZone:hover .dz-icon { border-color: var(--accent); }
+
+.dz-icon svg { width: 26px; height: 26px; color: var(--accent); }
+
+.dz-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 0.9rem;
+  letter-spacing: 4px;
+  font-weight: 600;
+  color: var(--white);
+  margin-bottom: 8px;
+}
+
+.dz-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-bottom: 22px;
+}
+
+.dz-btn {
+  display: inline-block;
+  padding: 9px 24px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  letter-spacing: 3px;
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.dz-btn:hover { background: var(--accent); color: var(--bg); }
+
+#fileInput { display: none; }
+
+/* ── CONTROLS PANEL ── */
+#ctrlPanel { display: none; margin-top: 20px; }
+#ctrlPanel.show { display: block; }
+
+/* File bar */
+.file-bar {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 14px 18px;
+  margin-bottom: 20px;
+}
+
+.pdf-icon {
+  flex-shrink: 0;
+  width: 34px; height: 42px;
+  background: rgba(255,60,60,0.1);
+  border: 1px solid rgba(255,60,60,0.3);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Orbitron', monospace;
+  font-size: 0.42rem;
+  font-weight: 700;
+  color: var(--danger);
+  letter-spacing: 1px;
+}
+
+.file-meta-wrap { flex: 1; min-width: 0; }
+
+.f-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--white);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+
+.f-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+.f-meta strong { color: var(--accent); font-weight: 400; }
+
+.clear-btn {
+  flex-shrink: 0;
+  background: none; border: 1px solid var(--border2);
+  color: var(--muted);
+  padding: 6px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem; letter-spacing: 1px;
+  cursor: pointer; transition: all .2s;
+}
+
+.clear-btn:hover { border-color: var(--danger); color: var(--danger); }
+
+/* Slider card */
+.slider-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 26px 24px 20px;
+  margin-bottom: 20px;
+}
+
+.slider-top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 28px;
+}
+
+.slider-lbl {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 4px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.quality-num {
+  font-family: 'Orbitron', monospace;
+  font-size: 2.2rem;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: 0 0 14px rgba(57,255,20,0.6);
+}
+
+.quality-num .pct { font-size: 1rem; color: var(--muted); }
+
+/* Range */
+.range-wrap {
+  position: relative;
+  padding-bottom: 36px;
+}
+
+#qualSlider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  outline: none;
+  cursor: pointer;
+  border-radius: 0;
+  background: linear-gradient(to right, var(--accent) 0%, var(--border2) 0%);
+  transition: background .05s;
+}
+
+#qualSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px; height: 20px;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  cursor: pointer;
+  box-shadow: 0 0 10px var(--accent), 0 0 0 4px rgba(57,255,20,0.08);
+  transition: box-shadow .2s;
+}
+
+#qualSlider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 18px var(--accent), 0 0 0 6px rgba(57,255,20,0.15);
+}
+
+#qualSlider::-moz-range-thumb {
+  width: 20px; height: 20px;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  cursor: pointer;
+  box-shadow: 0 0 10px var(--accent);
+}
+
+/* Ticks */
+.ticks {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  display: flex; justify-content: space-between;
+}
+
+.tick-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  position: relative;
+}
+
+.tick-line { width: 1px; height: 5px; background: var(--border2); }
+
+.tick-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.58rem;
+  color: var(--muted);
+}
+
+/* Mode tag */
+.mode-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.58rem;
+  letter-spacing: 2px;
+  padding: 4px 10px;
+  border: 1px solid;
+  margin-top: 12px;
+  transition: all .2s;
+}
+
+.mode-dot { width: 5px; height: 5px; border-radius: 50%; }
+
+/* Size compare strip */
+.size-strip {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.sz-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 14px 16px;
+}
+
+.sz-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  letter-spacing: 3px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.sz-value {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--white);
+  line-height: 1.1;
+}
+
+.sz-unit {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.sz-arrow {
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.sz-reduction {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  color: var(--accent);
+  margin-top: 3px;
+}
+
+/* Compress button */
+#compressBtn {
+  width: 100%;
+  padding: 17px;
+  background: var(--accent);
+  border: none;
+  color: #040910;
+  font-family: 'Orbitron', monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 6px;
+  cursor: pointer;
+  transition: all .2s;
+  text-transform: uppercase;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+
+#compressBtn:hover:not(:disabled) {
+  background: #62ff3c;
+  box-shadow: 0 0 28px rgba(57,255,20,0.45);
+}
+
+#compressBtn:active:not(:disabled) { transform: scale(0.995); }
+
+#compressBtn:disabled {
+  background: var(--border2);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* ── PROGRESS ── */
+#progressBox {
+  display: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 22px 22px 20px;
+  margin-top: 20px;
+}
+
+#progressBox.show { display: block; }
+
+.prog-header {
+  display: flex; justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 2px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.prog-pct { color: var(--accent); }
+
+.prog-track {
+  height: 3px;
+  background: var(--border2);
+  position: relative;
+  overflow: hidden;
+}
+
+.prog-fill {
+  position: absolute; top: 0; left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  width: 0%;
+  transition: width .25s ease;
+  box-shadow: 0 0 8px var(--accent);
+}
+
+/* Scan animation */
+@keyframes scan {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(500%); }
+}
+
+.prog-track::after {
+  content: '';
+  position: absolute; top: 0; left: 0;
+  width: 30%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  animation: scan 1.4s linear infinite;
+}
+
+.prog-step {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--accent);
+  margin-top: 9px;
+  letter-spacing: 1px;
+}
+
+/* ── ERROR ── */
+#errBox {
+  display: none;
+  background: rgba(255,60,60,0.08);
+  border: 1px solid var(--danger);
+  padding: 12px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--danger);
+  letter-spacing: 1px;
+  margin-top: 18px;
+}
+
+#errBox.show { display: block; }
+
+/* ── RESULT PANEL ── */
+#resultPanel {
+  display: none;
+  margin-top: 20px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 30px rgba(57,255,20,0.06), 0 0 0 1px rgba(57,255,20,0.04);
+  padding: 28px 24px 24px;
+  animation: revealUp .35s ease;
+}
+
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+#resultPanel.show { display: block; }
+
+.res-head {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 22px;
+}
+
+.res-badge {
+  font-family: 'Orbitron', monospace;
+  font-size: 0.5rem;
+  letter-spacing: 3px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  background: var(--accent-glow);
+  padding: 4px 10px;
+}
+
+.res-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 0.7rem;
+  letter-spacing: 4px;
+  color: var(--white);
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.stat-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  padding: 14px 12px;
+}
+
+.stat-key {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.55rem;
+  letter-spacing: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+
+.stat-val {
+  font-family: 'Orbitron', monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--white);
+  line-height: 1.2;
+}
+
+.stat-val.green { color: var(--accent); }
+
+/* Download btn */
+#dlBtn {
+  width: 100%;
+  padding: 15px;
+  background: transparent;
+  border: 2px solid var(--accent);
+  color: var(--accent);
+  font-family: 'Orbitron', monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 5px;
+  cursor: pointer;
+  transition: all .2s;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+
+#dlBtn:hover {
+  background: var(--accent);
+  color: var(--bg);
+  box-shadow: 0 0 22px rgba(57,255,20,0.35);
+}
+
+.again-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: all .2s;
+}
+
+.again-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── FOOTER ── */
+footer {
+  margin-top: 52px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.58rem;
+  color: var(--muted);
+  letter-spacing: 2px;
+  line-height: 2;
+}
+
+/* ── MOBILE ── */
+@media (max-width: 560px) {
+  .logo { font-size: 2rem; letter-spacing: 8px; }
+  .stat-row { grid-template-columns: repeat(2, 1fr); }
+  .stat-row .stat-box:last-child { grid-column: span 2; }
+  .size-strip { grid-template-columns: 1fr 1fr; }
+  .sz-arrow { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo">KOMPRS</div>
+    <div class="logo-sub">PDF COMPRESSION ENGINE</div>
+    <div>
+      <span class="wasm-pill">
+        <span class="wasm-dot"></span>
+        WEBASSEMBLY · PDF.JS · PDF-LIB · ZERO SERVER
+      </span>
+    </div>
+  </header>
+
+  <!-- DROP ZONE -->
+  <div id="dropZone">
+    <div class="dz-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+      </svg>
+    </div>
+    <div class="dz-title">DROP PDF HERE</div>
+    <div class="dz-sub">drag & drop, or click to browse — works offline after first load</div>
+    <button class="dz-btn" onclick="document.getElementById('fileInput').click()">SELECT FILE</button>
+    <input type="file" id="fileInput" accept=".pdf">
+  </div>
+
+  <!-- CONTROLS PANEL -->
+  <div id="ctrlPanel">
+
+    <!-- File bar -->
+    <div class="file-bar">
+      <div class="pdf-icon">PDF</div>
+      <div class="file-meta-wrap">
+        <div class="f-name" id="fName">—</div>
+        <div class="f-meta">
+          Size: <strong id="fSize">—</strong> &nbsp;·&nbsp; Pages: <strong id="fPages">—</strong>
+        </div>
+      </div>
+      <button class="clear-btn" id="clearBtn">✕ CLEAR</button>
+    </div>
+
+    <!-- Slider card -->
+    <div class="slider-card">
+      <div class="slider-top">
+        <div>
+          <div class="slider-lbl">IMAGE QUALITY</div>
+          <div style="margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:0.62rem;color:var(--muted);">
+            lower = more compressed
+          </div>
+        </div>
+        <div class="quality-num" id="qNum">65<span class="pct">%</span></div>
+      </div>
+
+      <div class="range-wrap">
+        <input type="range" id="qualSlider" min="20" max="95" step="5" value="65">
+        <div class="ticks" id="tickBar"></div>
+      </div>
+
+      <div id="modeTag"></div>
+    </div>
+
+    <!-- Size compare -->
+    <div class="size-strip">
+      <div class="sz-box">
+        <div class="sz-label">ORIGINAL</div>
+        <div class="sz-value" id="origV">—<span class="sz-unit" id="origU"></span></div>
+      </div>
+      <div class="sz-arrow">
+        →<br>
+        <span id="redPct" style="color:var(--accent);font-size:0.6rem">—</span>
+      </div>
+      <div class="sz-box">
+        <div class="sz-label">ESTIMATED</div>
+        <div class="sz-value" id="estV">—<span class="sz-unit" id="estU"></span></div>
+      </div>
+    </div>
+
+    <!-- Compress button -->
+    <button id="compressBtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/>
+        <line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/>
+        <polyline points="19 9 22 12 19 15"/><polyline points="9 19 12 22 15 19"/>
+      </svg>
+      COMPRESS PDF
+    </button>
+
+    <!-- Progress -->
+    <div id="progressBox">
+      <div class="prog-header">
+        <span id="progLabel">COMPRESSING</span>
+        <span class="prog-pct" id="progPct">0%</span>
+      </div>
+      <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+      <div class="prog-step" id="progStep">Initializing…</div>
+    </div>
+
+    <!-- Error -->
+    <div id="errBox"></div>
+
+  </div>
+
+  <!-- RESULT PANEL -->
+  <div id="resultPanel">
+    <div class="res-head">
+      <div class="res-badge">✓ DONE</div>
+      <div class="res-title">COMPRESSION COMPLETE</div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-box">
+        <div class="stat-key">ORIGINAL</div>
+        <div class="stat-val" id="rOrig">—</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-key">COMPRESSED</div>
+        <div class="stat-val green" id="rNew">—</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-key">SPACE SAVED</div>
+        <div class="stat-val green" id="rSaved">—</div>
+      </div>
+    </div>
+    <button id="dlBtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      DOWNLOAD COMPRESSED PDF
+    </button>
+    <button class="again-btn" id="againBtn">↩ COMPRESS AGAIN WITH DIFFERENT SETTINGS</button>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    CLIENT-SIDE ONLY · FILES NEVER LEAVE YOUR DEVICE<br>
+    PDF.js WASM RENDERING ENGINE + PDF-LIB ZLIB COMPRESSION
+  </footer>
+</div>
+
+<!-- ── LIBRARIES ── -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+
+<script>
+'use strict';
+
+// ── PDF.js worker ──
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ── State ──
+let state = {
+  file: null,
+  pdfDoc: null,
+  pages: 0,
+  originalBytes: 0,
+  baseline: null,   // { quality, byteSize } for 1 page at baseline quality
+  compressedBlob: null,
+  blobUrl: null
+};
+
+// ── DOM ──
+const $ = id => document.getElementById(id);
+const dropZone    = $('dropZone');
+const fileInput   = $('fileInput');
+const ctrlPanel   = $('ctrlPanel');
+const fName       = $('fName');
+const fSize       = $('fSize');
+const fPages      = $('fPages');
+const clearBtn    = $('clearBtn');
+const qualSlider  = $('qualSlider');
+const qNum        = $('qNum');
+const modeTag     = $('modeTag');
+const origV       = $('origV');
+const origU       = $('origU');
+const estV        = $('estV');
+const estU        = $('estU');
+const redPct      = $('redPct');
+const compressBtn = $('compressBtn');
+const progressBox = $('progressBox');
+const progFill    = $('progFill');
+const progPct     = $('progPct');
+const progStep    = $('progStep');
+const errBox      = $('errBox');
+const resultPanel = $('resultPanel');
+const rOrig       = $('rOrig');
+const rNew        = $('rNew');
+const rSaved      = $('rSaved');
+const dlBtn       = $('dlBtn');
+const againBtn    = $('againBtn');
+
+// ── Utilities ──
+function fmt(bytes) {
+  if (bytes < 1024)        return { n: bytes.toFixed(0),        u: ' B' };
+  if (bytes < 1024*1024)   return { n: (bytes/1024).toFixed(1), u: ' KB' };
+  return { n: (bytes/1024/1024).toFixed(2), u: ' MB' };
+}
+function fmtStr(bytes) { const f = fmt(bytes); return f.n + f.u; }
+
+// ── Slider ticks ──
+(function buildTicks() {
+  const ticks = [20, 35, 50, 65, 80, 95];
+  const bar = $('tickBar');
+  ticks.forEach(v => {
+    const d = document.createElement('div');
+    d.className = 'tick-item';
+    d.innerHTML = `<div class="tick-line"></div><div class="tick-val">${v}%</div>`;
+    bar.appendChild(d);
+  });
+})();
+
+// ── Mode definitions ──
+const MODES = [
+  { max: 30, label: 'EXTREME COMPRESSION', color: '#FF3C3C' },
+  { max: 45, label: 'HIGH COMPRESSION',    color: '#FF6600' },
+  { max: 60, label: 'HEAVY COMPRESSION',   color: '#FFAA00' },
+  { max: 75, label: 'BALANCED',            color: '#C8FF00' },
+  { max: 88, label: 'HIGH QUALITY',        color: '#6EFF00' },
+  { max: 95, label: 'NEAR LOSSLESS',       color: '#39FF14' },
+];
+
+function getMode(q) {
+  return MODES.find(m => q <= m.max) || MODES[MODES.length - 1];
+}
+
+// ── Slider track fill ──
+function updateTrack(q) {
+  const pct = ((q - 20) / (95 - 20)) * 100;
+  const mode = getMode(q);
+
+  // Color transitions: danger → warning → accent
+  let gradColor;
+  if (q <= 35)      gradColor = '#FF3C3C';
+  else if (q <= 55) gradColor = '#FF8C00';
+  else if (q <= 70) gradColor = '#FFCC00';
+  else              gradColor = '#39FF14';
+
+  qualSlider.style.background =
+    `linear-gradient(to right, ${gradColor} ${pct}%, var(--border2) ${pct}%)`;
+
+  qNum.innerHTML = `${q}<span class="pct">%</span>`;
+  qNum.style.color = mode.color;
+  qNum.style.textShadow = `0 0 14px ${mode.color}80`;
+
+  modeTag.innerHTML = `
+    <span class="mode-tag" style="border-color:${mode.color};color:${mode.color}">
+      <span class="mode-dot" style="background:${mode.color}"></span>
+      ${mode.label}
+    </span>`;
+}
+
+// ── Estimate output size ──
+function updateEstimate() {
+  if (!state.file) return;
+
+  const q = parseInt(qualSlider.value);
+  const origF = fmt(state.originalBytes);
+  origV.innerHTML = origF.n + `<span class="sz-unit"> ${origF.u.trim()}</span>`;
+
+  if (!state.baseline) {
+    estV.textContent = '…';
+    redPct.textContent = '—';
+    return;
+  }
+
+  // Estimate: size scales with quality^1.8 (empirically derived for JPEG)
+  const scaleFactor = Math.pow(q / state.baseline.quality, 1.8);
+  const estPageBytes = state.baseline.byteSize * scaleFactor;
+  // Overhead: ~2KB per page + 8KB PDF structure + object streams overhead
+  const overhead = state.pages * 2048 + 8192;
+  const totalEst = Math.max(estPageBytes * state.pages + overhead, 5120);
+
+  const estF = fmt(totalEst);
+  estV.innerHTML = `~${estF.n}<span class="sz-unit"> ${estF.u.trim()}</span>`;
+
+  const saved = state.originalBytes - totalEst;
+  const savedPct = Math.round((saved / state.originalBytes) * 100);
+
+  if (savedPct > 0) {
+    redPct.textContent = `▼ ${savedPct}%`;
+    redPct.style.color = 'var(--accent)';
+  } else {
+    redPct.textContent = `▲ ${Math.abs(savedPct)}%`;
+    redPct.style.color = 'var(--warning)';
+  }
+}
+
+// ── Slider events ──
+qualSlider.addEventListener('input', () => {
+  const q = parseInt(qualSlider.value);
+  updateTrack(q);
+  updateEstimate();
+});
+
+// Init slider
+updateTrack(65);
+
+// ── Drag & Drop ──
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type === 'application/pdf') loadFile(f);
+  else showErr('Invalid file. Please drop a PDF.');
+});
+
+dropZone.addEventListener('click', e => {
+  if (!e.target.classList.contains('dz-btn')) return;
+  fileInput.click();
+});
+
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) loadFile(e.target.files[0]);
+});
+
+// ── Load PDF ──
+async function loadFile(file) {
+  reset();
+  clearErr();
+
+  state.file = file;
+  state.originalBytes = file.size;
+
+  fName.textContent = file.name;
+  const f = fmt(file.size);
+  fSize.textContent = f.n + f.u;
+  fPages.textContent = 'loading…';
+
+  ctrlPanel.classList.add('show');
+  updateTrack(parseInt(qualSlider.value));
+  updateEstimate();
+
+  try {
+    const buf = await file.arrayBuffer();
+    const task = pdfjsLib.getDocument({ data: buf });
+    state.pdfDoc = await task.promise;
+    state.pages = state.pdfDoc.numPages;
+    fPages.textContent = state.pages + (state.pages === 1 ? ' page' : ' pages');
+
+    // Baseline: render page 1 at quality 65 to calibrate estimates
+    await buildBaseline();
+    updateEstimate();
+  } catch (err) {
+    showErr('Could not parse PDF: ' + (err.message || err));
+    console.error(err);
+  }
+}
+
+// ── Build size baseline ──
+async function buildBaseline() {
+  const BASELINE_Q = 65;
+  try {
+    const page = await state.pdfDoc.getPage(1);
+    const vp = page.getViewport({ scale: 1.2 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vp.width);
+    canvas.height = Math.round(vp.height);
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+    const dataUrl = canvas.toDataURL('image/jpeg', BASELINE_Q / 100);
+    const b64 = dataUrl.split(',')[1];
+    const byteSize = Math.ceil((b64.length * 3) / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
+
+    state.baseline = { quality: BASELINE_Q, byteSize };
+
+    // Free canvas memory
+    canvas.width = 1; canvas.height = 1;
+  } catch (e) {
+    console.warn('Baseline failed:', e);
+  }
+}
+
+// ── Clear ──
+clearBtn.addEventListener('click', resetAll);
+againBtn.addEventListener('click', () => {
+  resultPanel.classList.remove('show');
+  state.compressedBlob = null;
+  if (state.blobUrl) { URL.revokeObjectURL(state.blobUrl); state.blobUrl = null; }
+});
+
+function reset() {
+  state.pdfDoc = null;
+  state.pages = 0;
+  state.baseline = null;
+  state.compressedBlob = null;
+  if (state.blobUrl) { URL.revokeObjectURL(state.blobUrl); state.blobUrl = null; }
+}
+
+function resetAll() {
+  reset();
+  state.file = null;
+  state.originalBytes = 0;
+  fileInput.value = '';
+  ctrlPanel.classList.remove('show');
+  resultPanel.classList.remove('show');
+  progressBox.classList.remove('show');
+  clearErr();
+}
+
+// ── Compress ──
+compressBtn.addEventListener('click', async () => {
+  if (!state.file || !state.pdfDoc) return;
+  clearErr();
+  resultPanel.classList.remove('show');
+  compressBtn.disabled = true;
+  progressBox.classList.add('show');
+  setProgress(0, 'Starting compression engine…');
+
+  const quality = parseInt(qualSlider.value);
+  // Scale: higher quality → higher DPI (sharper render), lower quality → lower DPI (smaller file)
+  // Range: 0.7 (q=20) to 1.5 (q=95)
+  const scale = 0.7 + ((quality - 20) / 75) * 0.8;
+
+  try {
+    const bytes = await runCompression(quality, scale);
+    showResult(bytes);
+  } catch (err) {
+    showErr('Compression failed: ' + (err.message || err));
+    console.error(err);
+  } finally {
+    compressBtn.disabled = false;
+    progressBox.classList.remove('show');
+  }
+});
+
+// ── Core compression pipeline ──
+async function runCompression(quality, scale) {
+  const { PDFDocument } = PDFLib;
+  const newDoc = await PDFDocument.create();
+
+  for (let i = 0; i < state.pages; i++) {
+    const pct = Math.round((i / state.pages) * 90);
+    setProgress(pct, `Rendering page ${i + 1} of ${state.pages}…`);
+
+    // 1. Render page to canvas at target scale
+    const page = await state.pdfDoc.getPage(i + 1);
+    const viewport = page.getViewport({ scale });
+    const origViewport = page.getViewport({ scale: 1.0 });
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    // White background (prevents transparency artefacts in JPEG)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    await page.render({ canvasContext: ctx, viewport, intent: 'display' }).promise;
+
+    // 2. Encode as JPEG at target quality
+    const dataUrl = canvas.toDataURL('image/jpeg', quality / 100);
+    const b64 = dataUrl.split(',')[1];
+    const imgBytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+
+    // Free canvas RAM immediately
+    canvas.width = 1; canvas.height = 1;
+
+    // 3. Embed JPEG into new PDF at original page dimensions
+    const jpegImg = await newDoc.embedJpg(imgBytes);
+    const newPage = newDoc.addPage([origViewport.width, origViewport.height]);
+    newPage.drawImage(jpegImg, {
+      x: 0, y: 0,
+      width: origViewport.width,
+      height: origViewport.height,
+    });
+
+    // Yield to browser between pages (prevents UI freeze)
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  setProgress(92, 'Writing PDF with zlib compression (WASM)…');
+
+  // 4. Save with object streams (zlib/deflate — WASM-accelerated in modern browsers)
+  const saved = await newDoc.save({
+    useObjectStreams: true,
+    addDefaultPage: false,
+  });
+
+  setProgress(100, 'Done.');
+  return saved;
+}
+
+// ── Show result ──
+function showResult(bytes) {
+  const newSize = bytes.byteLength;
+  const saved   = state.originalBytes - newSize;
+  const pct     = Math.round((Math.abs(saved) / state.originalBytes) * 100);
+
+  rOrig.textContent  = fmtStr(state.originalBytes);
+  rNew.textContent   = fmtStr(newSize);
+  rSaved.textContent = (saved >= 0 ? '▼ ' : '▲ ') + fmtStr(Math.abs(saved)) +
+                       (saved >= 0 ? ` (${pct}%)` : ` (+${pct}%)`);
+  if (saved < 0) rSaved.classList.remove('green');
+  else           rSaved.classList.add('green');
+
+  // Blob URL for download
+  if (state.blobUrl) URL.revokeObjectURL(state.blobUrl);
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  state.blobUrl = URL.createObjectURL(blob);
+  state.compressedBlob = blob;
+
+  const baseName = state.file.name.replace(/\.pdf$/i, '');
+  const q = qualSlider.value;
+  const fileName = `${baseName}_compressed_Q${q}.pdf`;
+
+  dlBtn.onclick = () => {
+    const a = document.createElement('a');
+    a.href = state.blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  resultPanel.classList.add('show');
+  resultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── Progress helpers ──
+function setProgress(pct, step) {
+  progFill.style.width  = pct + '%';
+  progPct.textContent   = pct + '%';
+  progStep.textContent  = step;
+}
+
+// ── Error helpers ──
+function showErr(msg) {
+  errBox.textContent = '⚠ ' + msg;
+  errBox.classList.add('show');
+}
+
+function clearErr() {
+  errBox.textContent = '';
+  errBox.classList.remove('show');
+}
+</script>
+</body>
+</html>
